@@ -6,7 +6,7 @@ from pathlib import Path
 from time import perf_counter
 
 from coverage import build_coverage_map
-from greedy import GreedyResult, greedy_set_cover
+from algorithm import GreedyResult, brute_force_set_cover, greedy_set_cover
 from visualization import draw_floor_plan
 
 
@@ -43,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         help="Tampilkan visualisasi selain menyimpannya sebagai PNG.",
     )
 
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Bandingkan hasil greedy dengan brute force.",
+    )
+
     return parser.parse_args()
 
 
@@ -65,7 +71,8 @@ def load_scenario(path: Path) -> dict:
 
     if missing:
         raise ValueError(
-            "Skenario tidak lengkap. Kunci yang hilang: " + ", ".join(sorted(missing))
+            "Skenario tidak lengkap. Kunci yang hilang: "
+            + ", ".join(sorted(missing))
         )
 
     return data
@@ -105,11 +112,12 @@ def print_result(
         )
 
     coverage_percentage = (
-        len(result.covered_users) / total_users * 100 if total_users else 100.0
+        len(result.covered_users) / total_users * 100
+        if total_users
+        else 100.0
     )
 
-    print("\n=== Ringkasan ===")
-
+    print("\n=== Ringkasan Greedy ===")
     print(f"AP terpilih       : {', '.join(result.selected_candidates) or '-'}")
     print(f"Jumlah AP         : {len(result.selected_candidates)}")
     print(f"Pengguna tercakup : {len(result.covered_users)}/{total_users}")
@@ -119,6 +127,35 @@ def print_result(
 
     if result.uncovered_users:
         print("Pengguna belum tercakup: " + ", ".join(result.uncovered_users))
+
+
+def print_brute_force_result(
+    brute_result,
+    elapsed_ms: float,
+    total_users: int,
+) -> None:
+    coverage_percentage = (
+        len(brute_result.covered_users) / total_users * 100
+        if total_users
+        else 100.0
+    )
+
+    print("\n=== Ringkasan Brute Force ===")
+    print(
+        "AP terpilih       : "
+        f"{', '.join(brute_result.selected_candidates) or '-'}"
+    )
+    print(f"Jumlah AP         : {len(brute_result.selected_candidates)}")
+    print(f"Pengguna tercakup : {len(brute_result.covered_users)}/{total_users}")
+    print(f"Persentase        : {coverage_percentage:.2f}%")
+    print(f"Kombinasi dicek   : {brute_result.checked_combinations}")
+    print(f"Waktu eksekusi    : {elapsed_ms:.4f} ms")
+
+    if brute_result.uncovered_users:
+        print(
+            "Pengguna belum tercakup: "
+            + ", ".join(brute_result.uncovered_users)
+        )
 
 
 def main() -> None:
@@ -154,7 +191,8 @@ def main() -> None:
     radius = float(scenario["radius"])
 
     initial_output = args.output_dir / "denah.png"
-    result_output = args.output_dir / "hasil.png"
+    greedy_output = args.output_dir / "hasil-greedy.png"
+    bruteforce_output = args.output_dir / "hasil-bruteforce.png"
 
     # Membuat gambar kondisi awal.
     draw_floor_plan(
@@ -176,17 +214,17 @@ def main() -> None:
         radius,
     )
 
-    # Menjalankan algoritma dan mengukur waktunya.
-    start = perf_counter()
+    # Menjalankan algoritma greedy dan mengukur waktunya.
+    greedy_start = perf_counter()
 
     result = greedy_set_cover(
         set(users),
         coverage_map,
     )
 
-    elapsed_ms = (perf_counter() - start) * 1000
+    greedy_elapsed_ms = (perf_counter() - greedy_start) * 1000
 
-    # Membuat gambar hasil pemilihan AP.
+    # Membuat gambar hasil pemilihan AP oleh greedy.
     draw_floor_plan(
         width=width,
         height=height,
@@ -194,22 +232,65 @@ def main() -> None:
         candidates=candidates,
         walls=walls,
         rooms=rooms,
-        selected_candidates=(result.selected_candidates),
+        selected_candidates=result.selected_candidates,
         covered_users=result.covered_users,
         radius=radius,
-        output_file=result_output,
+        output_file=greedy_output,
         title="Hasil Greedy Set Cover",
         show=args.show,
     )
 
     print_result(
         result,
-        elapsed_ms,
+        greedy_elapsed_ms,
         len(users),
     )
 
-    print(f"\nGambar awal  : {initial_output}")
-    print(f"Gambar hasil : {result_output}")
+    if args.compare:
+        brute_start = perf_counter()
+
+        brute_result = brute_force_set_cover(
+            set(users),
+            coverage_map,
+        )
+
+        draw_floor_plan(
+            width=width,
+            height=height,
+            users=users,
+            candidates=candidates,
+            walls=walls,
+            rooms=rooms,
+            selected_candidates=brute_result.selected_candidates,
+            covered_users=brute_result.covered_users,
+            radius=radius,
+            output_file=bruteforce_output,
+            title="Hasil Brute Force Set Cover",
+            show=False,
+        )
+
+        brute_elapsed_ms = (perf_counter() - brute_start) * 1000
+
+        print_brute_force_result(
+            brute_result,
+            brute_elapsed_ms,
+            len(users),
+        )
+
+        print("\n=== Perbandingan ===")
+        print(f"Greedy      : {len(result.selected_candidates)} AP")
+        print(f"Brute Force : {len(brute_result.selected_candidates)} AP")
+
+        if len(result.selected_candidates) == len(brute_result.selected_candidates):
+            print("Kesimpulan  : hasil greedy sama optimal dengan brute force.")
+        else:
+            print("Kesimpulan  : hasil greedy tidak optimal global.")
+
+    print(f"\nGambar awal   : {initial_output}")
+    print(f"Gambar greedy : {greedy_output}")
+    
+    if args.compare:
+        print(f"Gambar brute  : {bruteforce_output}")
 
 
 if __name__ == "__main__":
